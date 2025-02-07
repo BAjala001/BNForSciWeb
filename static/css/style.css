@@ -1,0 +1,98 @@
+/* Global styles */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: #333;
+}
+
+/* Navigation */
+.navbar {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.navbar-brand {
+    font-weight: bold;
+    color: #007bff;
+}
+
+/* Cards */
+.card {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border: none;
+    margin-bottom: 20px;
+}
+
+.card-title {
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+/* Network Visualization */
+.network-visualization {
+    background: #fff;
+    min-height: 400px;
+}
+
+.node-circle {
+    stroke: #fff;
+    stroke-width: 2px;
+}
+
+.node-label {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.link {
+    stroke: #999;
+    stroke-opacity: 0.6;
+}
+
+/* Probability Bars */
+.probability-bar {
+    background: linear-gradient(to right, #4facfe 0%, #00f2fe 100%);
+    border-radius: 3px;
+}
+
+/* Forms */
+.form-control, .form-select {
+    border-radius: 4px;
+    border: 1px solid #ddd;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: #4facfe;
+    box-shadow: 0 0 0 0.2rem rgba(79,172,254,0.25);
+}
+
+/* Buttons */
+.btn-primary {
+    background: linear-gradient(to right, #4facfe 0%, #00f2fe 100%);
+    border: none;
+    box-shadow: 0 2px 4px rgba(79,172,254,0.3);
+}
+
+.btn-primary:hover {
+    background: linear-gradient(to right, #00f2fe 0%, #4facfe 100%);
+    transform: translateY(-1px);
+}
+
+/* Node Cards */
+.node-card {
+    transition: transform 0.2s;
+}
+
+.node-card:hover {
+    transform: translateY(-2px);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .network-visualization {
+        min-height: 300px;
+    }
+    
+    .card {
+        margin-bottom: 15px;
+    }
+} 

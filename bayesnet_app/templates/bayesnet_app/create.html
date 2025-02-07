@@ -1,0 +1,1219 @@
+{% extends 'bayesnet_app/base.html' %}
+
+{% block extra_css %}
+<style>
+    .node-list {
+        min-height: 200px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 10px;
+    }
+    .node-item {
+        background: #f8f9fa;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+    .cpt-table {
+        width: 100%;
+        margin-top: 10px;
+    }
+    .cpt-table th, .cpt-table td {
+        padding: 5px;
+        border: 1px solid #ddd;
+    }
+    .findings-section {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 4px;
+    }
+    .findings-toggle {
+        margin-bottom: 15px;
+    }
+    .findings-form {
+        display: none;
+    }
+    .findings-form.active {
+        display: block;
+    }
+    .parent-selection {
+        border: 1px solid #e9ecef;
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 10px;
+    }
+    .parent-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+    }
+    .parent-item .btn-remove {
+        margin-left: 10px;
+    }
+    .add-parent-btn {
+        width: 100%;
+        margin-top: 5px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row mb-4">
+        <div class="col">
+            <h2>Create Bayesian Network</h2>
+            <p class="text-muted">Add nodes, set CPTs, and optionally add findings to your network.</p>
+            <div class="btn-group">
+                <button class="btn btn-primary" id="saveNetworkBtn">
+                    <i class="fas fa-save"></i> Save Network
+                </button>
+                <button class="btn btn-secondary ms-2" id="loadNetworkBtn">
+                    <i class="fas fa-upload"></i> Load Network
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Add Node</h5>
+                    <form id="nodeForm">
+                        <div class="mb-3">
+                            <label class="form-label">Node Name</label>
+                            <input type="text" class="form-control" id="nodeName" required 
+                                   placeholder="e.g., S for Smoking">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Label</label>
+                            <input type="text" class="form-control" id="nodeLabel" required
+                                   placeholder="e.g., Smoking">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Values (comma-separated)</label>
+                            <input type="text" class="form-control" id="nodeValues" required
+                                   placeholder="e.g., 0,1">
+                            <small class="text-muted">Usually 0,1 for binary variables</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Parent Nodes</label>
+                            <select class="form-select" id="nodeParents" multiple>
+                                <!-- Will be populated dynamically -->
+                            </select>
+                            <small class="text-muted">Hold Ctrl/Cmd to select multiple parents</small>
+                        </div>
+                        <button type="button" class="btn btn-primary" onclick="handleAddNode()">Add Node</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">CPTs</h5>
+                    <div class="mt-3 mb-3">
+                        <select class="form-select mb-3" id="nodeSelector" multiple>
+                            <option value="">Show All Nodes</option>
+                        </select>
+                        <small class="text-muted d-block mb-2">Hold Ctrl/Cmd to select multiple nodes</small>
+                        <button class="btn btn-primary ms-2" id="calculateMarginals">Calculate Marginals</button>
+                        <button class="btn btn-info ms-2" id="plotMarginals">Plot Marginals</button>
+                        <button class="btn btn-secondary ms-2" id="plotNetwork">Plot Network</button>
+                    </div>
+                    <div class="node-list" id="networkNodes">
+                        <!-- Nodes will be added here -->
+                    </div>
+                    
+                    <!-- Findings Section -->
+                    <div class="findings-section mt-3">
+                        <div class="findings-toggle">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="includeFindingsToggle">
+                                <label class="form-check-label" for="includeFindingsToggle">
+                                    Include Findings
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="findings-form" id="findingsForm" style="display: none;">
+                            <h6>Set Findings</h6>
+                            <div id="findingsContainer">
+                                <!-- Will be populated with available nodes -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Marginals Display Section -->
+            <div class="card mt-3" id="marginalsSection" style="display: none;">
+                <div class="card-body">
+                    <h5 class="card-title">Marginal Probabilities</h5>
+                    <div id="marginalsDisplay"></div>
+                </div>
+            </div>
+            
+            <!-- Plot Display Section -->
+            <div class="card mt-3" id="plotSection" style="display: none;">
+                <div class="card-body">
+                    <h5 class="card-title">Marginals Plot</h5>
+                    <div id="plotDisplay"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Node Modal -->
+<div class="modal fade" id="editNodeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Node</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editNodeForm">
+                    <input type="hidden" id="editNodeOriginalName">
+                    <div class="mb-3">
+                        <label class="form-label">Node Name</label>
+                        <input type="text" class="form-control" id="editNodeName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Label</label>
+                        <input type="text" class="form-control" id="editNodeLabel" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Values (comma-separated)</label>
+                        <input type="text" class="form-control" id="editNodeValues" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Parent Nodes</label>
+                        <select class="form-select" id="editNodeParents" multiple>
+                            <option value="">Select parent nodes (optional)</option>
+                        </select>
+                        <small class="text-muted">Hold Ctrl/Cmd to select multiple parents</small>
+                    </div>
+                    <div class="accordion" id="visualPropertiesAccordion">
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#visualProperties">
+                                    Visual Properties
+                                </button>
+                            </h2>
+                            <div id="visualProperties" class="accordion-collapse collapse" data-bs-parent="#visualPropertiesAccordion">
+                                <div class="accordion-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">X Position</label>
+                                                <input type="number" class="form-control" id="editNodeXPos" step="0.1">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Y Position</label>
+                                                <input type="number" class="form-control" id="editNodeYPos" step="0.1">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Width</label>
+                                                <input type="number" class="form-control" id="editNodeWidth" step="0.1" min="0.1">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Height</label>
+                                                <input type="number" class="form-control" id="editNodeHeight" step="0.1" min="0.1">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Edge Color</label>
+                                                <input type="color" class="form-control" id="editNodeEdgeColor">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Fill Color</label>
+                                                <input type="color" class="form-control" id="editNodeFillColor">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Line Width</label>
+                                                <input type="number" class="form-control" id="editNodeLineWidth" step="0.5" min="0.5">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Font Size</label>
+                                                <input type="number" class="form-control" id="editNodeFontSize" step="1" min="8">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Text Color</label>
+                                        <input type="color" class="form-control" id="editNodeTextColor">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveNodeEdits">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Save Network Modal -->
+<div class="modal fade" id="saveNetworkModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Save Network</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="saveNetworkForm">
+                    <div class="mb-3">
+                        <label for="networkName" class="form-label">Network Name</label>
+                        <input type="text" class="form-control" id="networkName" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmSaveNetwork">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- File input for loading network (hidden) -->
+<input type="file" id="networkFileInput" accept=".json" style="display: none;">
+
+<!-- Plot Marginals Modal -->
+<div class="modal fade" id="plotMarginalsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Marginals Plot</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <div id="plotMarginalsDisplay"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Calculate Marginals Modal -->
+<div class="modal fade" id="calculateMarginalsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Calculated Marginals</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="calculateMarginalsDisplay"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Network Plot Modal -->
+<div class="modal fade" id="networkPlotModal" tabindex="-1" aria-labelledby="networkPlotModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="networkPlotModalLabel">Network Structure</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="networkPlotDisplay" class="text-center">
+                    <!-- Plot will be displayed here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let nodes = [];
+let findings = new Map();
+
+function createCPTTable(node) {
+    if (node.parents.length === 0) {
+        return `
+            <div class="cpt-table">
+                <h6>Probability Table</h6>
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>${node.name}</th>
+                            <th>Probability</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${node.values.map(value => `
+                            <tr>
+                                <td>${value}</td>
+                                <td>
+                                    <input type="number" step="0.01" min="0" max="1" 
+                                           class="form-control form-control-sm cpt-input" 
+                                           data-node="${node.name}" 
+                                           data-value="${value}"
+                                           required>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    const parentCombinations = generateParentCombinations(node);
+    return `
+        <div class="cpt-table">
+            <h6>Conditional Probability Table</h6>
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        ${node.parents.map(parent => `<th>${parent}</th>`).join('')}
+                        <th>${node.name}</th>
+                        <th>Probability</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${parentCombinations.map(combo => 
+                        node.values.map(value => `
+                            <tr>
+                                ${combo.map(v => `<td>${v}</td>`).join('')}
+                                <td>${value}</td>
+                                <td>
+                                    <input type="number" step="0.01" min="0" max="1" 
+                                           class="form-control form-control-sm cpt-input"
+                                           data-node="${node.name}"
+                                           data-parents="${combo.join(',')}"
+                                           data-value="${value}"
+                                           required>
+                                </td>
+                            </tr>
+                        `).join('')
+                    ).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function generateParentCombinations(node) {
+    const parentValues = node.parents.map(parent => 
+        nodes.find(n => n.name === parent).values
+    );
+    return cartesianProduct(parentValues);
+}
+
+function cartesianProduct(arrays) {
+    return arrays.reduce((acc, curr) => 
+        acc.flatMap(x => curr.map(y => Array.isArray(x) ? [...x, y] : [x, y]))
+    , [[]]);
+}
+
+function updateParentOptions() {
+    const parentsSelect = document.getElementById('nodeParents');
+    
+    // Clear current options except the default
+    parentsSelect.innerHTML = '<option value="">Select a parent node (optional)</option>';
+    
+    // Add all existing nodes as potential parents
+    nodes.forEach(node => {
+        const option = document.createElement('option');
+        option.value = node.name;
+        option.textContent = `${node.label} (${node.name})`;
+        parentsSelect.appendChild(option);
+    });
+}
+
+function updateFindingsForm() {
+    const container = document.getElementById('findingsContainer');
+    container.innerHTML = '';
+    
+    nodes.forEach(node => {
+        const div = document.createElement('div');
+        div.className = 'mb-3';
+        div.innerHTML = `
+            <label class="form-label">${node.label} (${node.name})</label>
+            <select class="form-select finding-select" data-node="${node.name}">
+                <option value="">No finding</option>
+                ${node.values.map(value => 
+                    `<option value="${value}" ${findings.get(node.name) === value ? 'selected' : ''}>
+                        ${value}
+                    </option>`
+                ).join('')}
+            </select>
+        `;
+        container.appendChild(div);
+    });
+}
+
+function updateNodeSelector() {
+    const nodeSelector = document.getElementById('nodeSelector');
+    nodeSelector.innerHTML = '<option value="">Select a node to view CPT</option>';
+    
+    nodes.forEach(node => {
+        const option = document.createElement('option');
+        option.value = node.name;
+        option.textContent = `${node.label} (${node.name})`;
+        nodeSelector.appendChild(option);
+    });
+}
+
+function handleAddNode() {
+    const nameInput = document.getElementById('nodeName');
+    const labelInput = document.getElementById('nodeLabel');
+    const valuesInput = document.getElementById('nodeValues');
+    const parentSelect = document.getElementById('nodeParents');
+    
+    const nodeName = nameInput.value.trim();
+    const nodeLabel = labelInput.value.trim();
+    const nodeValues = valuesInput.value.split(',').map(v => v.trim());
+    // Get all selected parents
+    const selectedParents = Array.from(parentSelect.selectedOptions).map(option => option.value);
+    
+    if (!nodeName || !nodeLabel || nodeValues.length === 0) {
+        alert('Please fill in all required fields');
+        return;
+    }
+    
+    // Create new node with default visual properties
+    const node = {
+        name: nodeName,
+        label: nodeLabel,
+        values: nodeValues,
+        parents: selectedParents,
+        xPos: 0,
+        yPos: 0,
+        width: 0.9,
+        height: 0.4,
+        edgecolor: '#0000ff',
+        facecolor: '#add8e6',
+        linewidth: 1,
+        fontsize: 12,
+        textcolor: '#000000',
+        ha: 'center',
+        va: 'center'
+    };
+    
+    // Add node to list
+    nodes.push(node);
+    
+    // Create and append node display
+    const nodeDiv = document.createElement('div');
+    nodeDiv.className = 'node-item';
+    nodeDiv.dataset.nodeName = node.name;
+    nodeDiv.innerHTML = `
+        <div class="d-flex justify-content-between align-items-start mb-2">
+            <h6>${node.label} (${node.name})</h6>
+            <div>
+                <button class="btn btn-primary btn-sm edit-node me-2" data-node="${node.name}">Edit</button>
+                <button class="btn btn-danger btn-sm delete-node" data-node="${node.name}">Delete</button>
+            </div>
+        </div>
+        <p>Values: ${node.values.join(', ')}</p>
+        <p>Parents: ${node.parents.length > 0 ? node.parents.join(', ') : 'None'}</p>
+        ${createCPTTable(node)}
+    `;
+    
+    // Get the network nodes container and append the new node
+    const networkNodesContainer = document.getElementById('networkNodes');
+    networkNodesContainer.appendChild(nodeDiv);
+    
+    // Clear form
+    nameInput.value = '';
+    labelInput.value = '';
+    valuesInput.value = '';
+    parentSelect.value = '';
+    
+    // Update parent options for next node
+    updateParentOptions();
+    
+    // Update findings form
+    updateFindingsForm();
+    
+    // Update node selector
+    updateNodeSelector();
+    
+    console.log('Node added:', node); // Debug log
+    console.log('Current nodes:', nodes); // Debug log
+}
+
+// Add findings toggle handler
+document.getElementById('includeFindingsToggle').addEventListener('change', function() {
+    const findingsForm = document.getElementById('findingsForm');
+    if (this.checked) {
+        findingsForm.style.display = 'block';
+    } else {
+        findings.clear();
+        document.querySelectorAll('.finding-select').forEach(select => {
+            select.value = '';
+        });
+    }
+});
+
+// Add findings selection handler
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('finding-select')) {
+        const nodeName = e.target.dataset.node;
+        const value = e.target.value;
+        
+        if (value) {
+            findings.set(nodeName, value);
+        } else {
+            findings.delete(nodeName);
+        }
+    }
+});
+
+// Save network to local storage
+document.getElementById('saveNetworkBtn').addEventListener('click', function() {
+    if (nodes.length === 0) {
+        alert('Please add at least one node to the network.');
+        return;
+    }
+    
+    // Collect CPT values and findings
+    const network = {
+        nodes: nodes.map(node => {
+            const nodeDiv = document.querySelector(`.node-item[data-node-name="${node.name}"]`);
+            const cptInputs = nodeDiv.querySelectorAll('.cpt-input');
+            const cptValues = Array.from(cptInputs).map(input => {
+                const value = parseFloat(input.value);
+                return isNaN(value) ? 0 : value;
+            });
+            
+            return {
+                ...node,
+                cpt: cptValues
+            };
+        }),
+        findings: Object.fromEntries(findings)
+    };
+    
+    // Save to local storage
+    localStorage.setItem('bayesianNetwork', JSON.stringify(network));
+    alert('Network saved successfully!');
+});
+
+// Calculate marginals
+document.getElementById('calculateMarginals').addEventListener('click', function() {
+    if (nodes.length === 0) {
+        alert('Please add at least one node to the network.');
+        return;
+    }
+    
+    // Collect CPT values and findings
+    const network = {
+        nodes: nodes.map(node => {
+            const nodeDiv = document.querySelector(`.node-item[data-node-name="${node.name}"]`);
+            const cptInputs = nodeDiv.querySelectorAll('.cpt-input');
+            const cptValues = Array.from(cptInputs).map(input => {
+                const value = parseFloat(input.value);
+                return isNaN(value) ? 0 : value;
+            });
+            
+            return {
+                ...node,
+                cpt: cptValues
+            };
+        }),
+        findings: Object.fromEntries(findings)
+    };
+    
+    fetch("{% url 'bayesnet_app:calculate_marginals' %}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({ network: network })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(data => {
+                throw new Error(data.error || 'Failed to calculate marginals');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        const marginalsDisplay = document.getElementById('calculateMarginalsDisplay');
+        marginalsDisplay.innerHTML = formatMarginals(data.marginals);
+        new bootstrap.Modal(document.getElementById('calculateMarginalsModal')).show();
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error calculating marginals: ' + error.message);
+    });
+});
+
+// Plot marginals
+document.getElementById('plotMarginals').addEventListener('click', function() {
+    if (nodes.length === 0) {
+        alert('Please add at least one node to the network.');
+        return;
+    }
+    
+    const data = {
+        network: {
+            nodes: nodes.map(node => {
+                const nodeDiv = document.querySelector(`.node-item[data-node-name="${node.name}"]`);
+                const cptInputs = nodeDiv.querySelectorAll('.cpt-input');
+                const cptValues = Array.from(cptInputs).map(input => {
+                    const value = parseFloat(input.value);
+                    return isNaN(value) ? 0 : value;
+                });
+                
+                return {
+                    ...node,
+                    cpt: cptValues,
+                    xPos: node.xPos || 0,
+                    yPos: node.yPos || 0,
+                    width: node.width || 0.9,
+                    height: node.height || 0.4,
+                    edgecolor: node.edgecolor || '#0000ff',
+                    facecolor: node.facecolor || '#add8e6',
+                    linewidth: node.linewidth || 1,
+                    fontsize: node.fontsize || 12,
+                    textcolor: node.textcolor || '#000000'
+                };
+            }),
+            findings: Object.fromEntries(findings)
+        }
+    };
+    
+    fetch("{% url 'bayesnet_app:plot_marginals' %}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(data => {
+                throw new Error(data.error || 'Failed to plot marginals');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (!data.plot) {
+            throw new Error('No plot data received from server');
+        }
+        
+        const plotDisplay = document.getElementById('plotMarginalsDisplay');
+        plotDisplay.innerHTML = `<img src="data:image/png;base64,${data.plot}" alt="Marginals Plot" style="max-width: 100%; height: auto;">`;
+        new bootstrap.Modal(document.getElementById('plotMarginalsModal')).show();
+    })
+    .catch(error => {
+        console.error('Error plotting marginals:', error);
+        alert('Error plotting marginals: ' + error.message);
+    });
+});
+
+function formatMarginals(marginals) {
+    let html = '<div class="container">';
+    for (const [nodeName, distribution] of Object.entries(marginals)) {
+        html += `<div class="card mb-3">
+            <div class="card-header">
+                <h6 class="mb-0">${nodeName}</h6>
+            </div>
+            <div class="card-body">
+                <table class="table table-striped table-sm">
+                    <thead>
+                        <tr>
+                            <th>Value</th>
+                            <th>Percentage</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+        
+        // Sort the distribution by node value
+        const sortedDist = [...distribution].sort((a, b) => {
+            const aVal = Object.keys(a)[0];
+            const bVal = Object.keys(b)[0];
+            return aVal.localeCompare(bVal);
+        });
+        
+        sortedDist.forEach(row => {
+            const value = Object.keys(row)[0];
+            const prob = parseFloat(row[value]); // Convert to number
+            html += `<tr>
+                <td>${value}</td>
+                <td>${prob.toFixed(2)}%</td>
+            </tr>`;
+        });
+        
+        html += `</tbody></table>
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+// Add delete node functionality
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('delete-node')) {
+        const nodeName = e.target.dataset.node;
+        const nodeToDelete = nodes.find(n => n.name === nodeName);
+        
+        // Check if any other nodes depend on this node
+        const dependentNodes = nodes.filter(n => n.parents.includes(nodeName));
+        if (dependentNodes.length > 0) {
+            alert(`Cannot delete node ${nodeName} because it is a parent of: ${dependentNodes.map(n => n.name).join(', ')}`);
+            return;
+        }
+        
+        // Remove node from nodes array
+        nodes = nodes.filter(n => n.name !== nodeName);
+        
+        // Remove node display
+        const nodeDiv = document.querySelector(`.node-item[data-node-name="${nodeName}"]`);
+        nodeDiv.remove();
+        
+        // Update parent options
+        updateParentOptions();
+        
+        // Update findings form
+        updateFindingsForm();
+        
+        // Update node selector
+        updateNodeSelector();
+        
+        console.log('Node deleted:', nodeName); // Debug log
+        console.log('Current nodes:', nodes); // Debug log
+    }
+});
+
+// Edit Node Modal
+const editModal = new bootstrap.Modal(document.getElementById('editNodeModal'));
+
+// Add edit node handler
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('edit-node')) {
+        const nodeName = e.target.dataset.node;
+        const nodeToEdit = nodes.find(n => n.name === nodeName);
+        
+        console.log('Editing node:', nodeToEdit); // Debug log
+        
+        // Populate edit form
+        document.getElementById('editNodeOriginalName').value = nodeToEdit.name;
+        document.getElementById('editNodeName').value = nodeToEdit.name;
+        document.getElementById('editNodeLabel').value = nodeToEdit.label;
+        document.getElementById('editNodeValues').value = nodeToEdit.values.join(',');
+        
+        // Update visual properties with actual node positions
+        document.getElementById('editNodeXPos').value = parseFloat(nodeToEdit.xPos) || 0;
+        document.getElementById('editNodeYPos').value = parseFloat(nodeToEdit.yPos) || 0;
+        document.getElementById('editNodeWidth').value = parseFloat(nodeToEdit.width) || 0.8;
+        document.getElementById('editNodeHeight').value = parseFloat(nodeToEdit.height) || 0.4;
+        document.getElementById('editNodeEdgeColor').value = nodeToEdit.edgecolor || '#0000ff';
+        document.getElementById('editNodeFillColor').value = nodeToEdit.facecolor || '#add8e6';
+        document.getElementById('editNodeLineWidth').value = parseFloat(nodeToEdit.linewidth) || 1;
+        document.getElementById('editNodeFontSize').value = parseInt(nodeToEdit.fontsize) || 12;
+        document.getElementById('editNodeTextColor').value = nodeToEdit.textcolor || '#000000';
+        
+        // Update parent options
+        const editParentSelect = document.getElementById('editNodeParents');
+        editParentSelect.innerHTML = '';
+        nodes.forEach(node => {
+            if (node.name !== nodeToEdit.name) {
+                const option = document.createElement('option');
+                option.value = node.name;
+                option.textContent = `${node.label} (${node.name})`;
+                option.selected = nodeToEdit.parents.includes(node.name);
+                editParentSelect.appendChild(option);
+            }
+        });
+        
+        editModal.show();
+    }
+});
+
+// Handle save edits with position updates
+document.getElementById('saveNodeEdits').addEventListener('click', function() {
+    const originalName = document.getElementById('editNodeOriginalName').value;
+    const newName = document.getElementById('editNodeName').value.trim();
+    const newLabel = document.getElementById('editNodeLabel').value.trim();
+    const newValues = document.getElementById('editNodeValues').value.split(',').map(v => v.trim());
+    const newParents = Array.from(document.getElementById('editNodeParents').selectedOptions)
+        .map(option => option.value)
+        .filter(value => value);
+    
+    // Get visual properties including positions
+    const xPos = parseFloat(document.getElementById('editNodeXPos').value) || 0;
+    const yPos = parseFloat(document.getElementById('editNodeYPos').value) || 0;
+    const width = parseFloat(document.getElementById('editNodeWidth').value) || 0.9;
+    const height = parseFloat(document.getElementById('editNodeHeight').value) || 0.4;
+    const edgecolor = document.getElementById('editNodeEdgeColor').value;
+    const facecolor = document.getElementById('editNodeFillColor').value;
+    const linewidth = parseFloat(document.getElementById('editNodeLineWidth').value) || 1;
+    const fontsize = parseInt(document.getElementById('editNodeFontSize').value) || 12;
+    const textcolor = document.getElementById('editNodeTextColor').value;
+    
+    // Validate inputs
+    if (!newName || !newLabel || newValues.length === 0) {
+        alert('Please fill in all required fields');
+        return;
+    }
+    
+    // Check if new name conflicts with existing nodes (except self)
+    if (newName !== originalName && nodes.some(n => n.name === newName)) {
+        alert('A node with this name already exists');
+        return;
+    }
+    
+    // Check if this node is a parent of other nodes
+    if (originalName !== newName) {
+        const dependentNodes = nodes.filter(n => n.parents.includes(originalName));
+        if (dependentNodes.length > 0) {
+            // Update parent references in dependent nodes
+            dependentNodes.forEach(node => {
+                node.parents = node.parents.map(p => p === originalName ? newName : p);
+            });
+        }
+    }
+    
+    // Update node
+    const nodeIndex = nodes.findIndex(n => n.name === originalName);
+    nodes[nodeIndex] = {
+        name: newName,
+        label: newLabel,
+        values: newValues,
+        parents: newParents,
+        xPos: xPos,
+        yPos: yPos,
+        width: width,
+        height: height,
+        edgecolor: edgecolor,
+        facecolor: facecolor,
+        linewidth: linewidth,
+        fontsize: fontsize,
+        textcolor: textcolor,
+        ha: 'center',
+        va: 'center'
+    };
+    
+    // Update display
+    const nodeDiv = document.querySelector(`.node-item[data-node-name="${originalName}"]`);
+    nodeDiv.dataset.nodeName = newName;
+    nodeDiv.innerHTML = `
+        <div class="d-flex justify-content-between align-items-start mb-2">
+            <h6>${newLabel} (${newName})</h6>
+            <div>
+                <button class="btn btn-primary btn-sm edit-node me-2" data-node="${newName}">Edit</button>
+                <button class="btn btn-danger btn-sm delete-node" data-node="${newName}">Delete</button>
+            </div>
+        </div>
+        <p>Values: ${newValues.join(', ')}</p>
+        <p>Parents: ${newParents.length > 0 ? newParents.join(', ') : 'None'}</p>
+        ${createCPTTable(nodes[nodeIndex])}
+    `;
+    
+    // Update parent options for all nodes
+    updateParentOptions();
+    
+    // Update findings form
+    updateFindingsForm();
+    
+    // Update node selector
+    updateNodeSelector();
+    
+    // Close modal
+    editModal.hide();
+    
+    console.log('Node updated:', nodes[nodeIndex]); // Debug log
+    console.log('Current nodes:', nodes); // Debug log
+});
+
+// Plot Network button event listener
+document.getElementById('plotNetwork').addEventListener('click', function() {
+    if (nodes.length === 0) {
+        alert('Please add at least one node to the network.');
+        return;
+    }
+
+    // Get the modal display element
+    const networkPlotDisplay = document.getElementById('networkPlotDisplay');
+    
+    // Show loading indicator in the modal
+    networkPlotDisplay.innerHTML = `
+        <div class="d-flex justify-content-center align-items-center" style="min-height: 200px;">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    `;
+
+    // Show the modal immediately
+    const networkPlotModal = new bootstrap.Modal(document.getElementById('networkPlotModal'));
+    networkPlotModal.show();
+
+    // Prepare the data for plot network
+    const data = {
+        nodes: nodes.map(node => {
+            const nodeDiv = document.querySelector(`.node-item[data-node-name="${node.name}"]`);
+            const cptInputs = nodeDiv.querySelectorAll('.cpt-input');
+            const cptValues = Array.from(cptInputs).map(input => {
+                const value = parseFloat(input.value);
+                return isNaN(value) ? 0 : value;
+            });
+            
+            // Include all node properties including positions
+            return {
+                name: node.name,
+                label: node.label,
+                values: node.values,
+                parents: node.parents,
+                cpt: cptValues,
+                xPos: parseFloat(node.xPos) || 0,
+                yPos: parseFloat(node.yPos) || 0,
+                width: parseFloat(node.width) || 0.8,
+                height: parseFloat(node.height) || 0.4,
+                edgecolor: node.edgecolor || '#0000ff',
+                facecolor: node.facecolor || '#add8e6',
+                linewidth: parseFloat(node.linewidth) || 1,
+                fontsize: parseInt(node.fontsize) || 12,
+                textcolor: node.textcolor || '#000000'
+            };
+        })
+    };
+
+    // Make the request
+    fetch("{% url 'bayesnet_app:plot_network' %}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.plot) {
+            // Update node positions from the plot
+            if (data.node_positions) {
+                data.node_positions.forEach(pos => {
+                    const node = nodes.find(n => n.name === pos.name);
+                    if (node) {
+                        node.xPos = pos.xPos;
+                        node.yPos = pos.yPos;
+                        console.log(`Updated position for ${node.name}: x=${pos.xPos}, y=${pos.yPos}`);
+                    }
+                });
+            }
+            
+            // Update modal content
+            networkPlotDisplay.innerHTML = `
+                <img src="data:image/png;base64,${data.plot}" 
+                     alt="Network Structure" 
+                     style="max-width: 100%; height: auto;">
+            `;
+        } else {
+            throw new Error(data.error || 'Failed to generate network plot');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        networkPlotDisplay.innerHTML = `
+            <div class="alert alert-danger" role="alert">
+                ${error.message}
+            </div>
+        `;
+    });
+});
+
+// Helper function to get CSRF token
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+const saveNetworkModal = new bootstrap.Modal(document.getElementById('saveNetworkModal'));
+
+// Save Network button handler
+document.getElementById('saveNetworkBtn').addEventListener('click', function() {
+    saveNetworkModal.show();
+});
+
+// Confirm Save Network handler
+document.getElementById('confirmSaveNetwork').addEventListener('click', function() {
+    const networkName = document.getElementById('networkName').value.trim();
+    if (!networkName) {
+        alert('Please enter a network name');
+        return;
+    }
+
+    // Collect network data
+    const networkData = {
+        name: networkName,
+        nodes: nodes.map(node => {
+            const nodeDiv = document.querySelector(`.node-item[data-node-name="${node.name}"]`);
+            const cptInputs = nodeDiv.querySelectorAll('.cpt-input');
+            const cptValues = Array.from(cptInputs).map(input => {
+                const value = parseFloat(input.value);
+                return isNaN(value) ? 0 : value;
+            });
+            
+            return {
+                ...node,
+                cpt: cptValues
+            };
+        })
+    };
+
+    // Create and download file
+    const blob = new Blob([JSON.stringify(networkData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${networkName}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    saveNetworkModal.hide();
+});
+
+// Load Network button handler
+document.getElementById('loadNetworkBtn').addEventListener('click', function() {
+    document.getElementById('networkFileInput').click();
+});
+
+// File input change handler
+document.getElementById('networkFileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const networkData = JSON.parse(e.target.result);
+            
+            // Clear existing nodes
+            nodes = [];
+            document.getElementById('networkNodes').innerHTML = '';
+            
+            // Load nodes
+            networkData.nodes.forEach(node => {
+                nodes.push(node);
+                const nodeDiv = document.createElement('div');
+                nodeDiv.className = 'node-item';
+                nodeDiv.dataset.nodeName = node.name;
+                nodeDiv.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h6>${node.label} (${node.name})</h6>
+                        <div>
+                            <button class="btn btn-primary btn-sm edit-node me-2" data-node="${node.name}">Edit</button>
+                            <button class="btn btn-danger btn-sm delete-node" data-node="${node.name}">Delete</button>
+                        </div>
+                    </div>
+                    <p>Values: ${node.values.join(', ')}</p>
+                    <p>Parents: ${node.parents.length > 0 ? node.parents.join(', ') : 'None'}</p>
+                    ${createCPTTable(node)}
+                `;
+                
+                document.getElementById('networkNodes').appendChild(nodeDiv);
+                
+                // Set CPT values
+                const cptInputs = nodeDiv.querySelectorAll('.cpt-input');
+                node.cpt.forEach((value, index) => {
+                    if (cptInputs[index]) {
+                        cptInputs[index].value = value;
+                    }
+                });
+            });
+            
+            // Update parent options and findings form
+            updateParentOptions();
+            updateFindingsForm();
+            
+            // Update node selector
+            updateNodeSelector();
+            
+            alert('Network loaded successfully!');
+        } catch (error) {
+            console.error('Error loading network:', error);
+            alert('Error loading network file. Please make sure it\'s a valid network file.');
+        }
+    };
+    reader.readAsText(file);
+    this.value = ''; // Reset file input
+});
+
+// Update the node selector change event handler
+document.getElementById('nodeSelector').addEventListener('change', function() {
+    const selectedNodes = Array.from(this.selectedOptions).map(option => option.value);
+    const networkNodesContainer = document.getElementById('networkNodes');
+    
+    // Show all nodes if "Show All Nodes" is selected or no selection
+    if (selectedNodes.includes('') || selectedNodes.length === 0) {
+        networkNodesContainer.querySelectorAll('.node-item').forEach(div => {
+            div.style.display = 'block';
+        });
+        // Deselect all options if "Show All Nodes" is selected
+        if (selectedNodes.includes('')) {
+            Array.from(this.options).forEach(option => {
+                if (option.value !== '') {
+                    option.selected = false;
+                }
+            });
+        }
+        return;
+    }
+    
+    // Hide all nodes except the selected ones
+    networkNodesContainer.querySelectorAll('.node-item').forEach(div => {
+        if (selectedNodes.includes(div.dataset.nodeName)) {
+            div.style.display = 'block';
+        } else {
+            div.style.display = 'none';
+        }
+    });
+});
+</script>
+{% endblock %} 

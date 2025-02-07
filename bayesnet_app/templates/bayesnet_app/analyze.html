@@ -1,0 +1,328 @@
+{% extends 'bayesnet_app/base.html' %}
+
+{% block extra_css %}
+<style>
+    .network-visualization {
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+    .node-card {
+        background: #f8f9fa;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+    .probability-bar {
+        height: 20px;
+        background-color: #007bff;
+        margin-top: 5px;
+        transition: width 0.3s ease;
+    }
+    .plot-image {
+        max-width: 100%;
+        height: auto;
+    }
+    .node circle {
+        fill: #69b3a2;
+        stroke: #fff;
+        stroke-width: 2px;
+    }
+    .node.with-finding circle {
+        fill: #ff7f50;
+    }
+    .node text {
+        font-size: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Network Visualization</h5>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="showFindings" checked>
+                        <label class="form-check-label" for="showFindings">Show Findings in Visualization</label>
+                    </div>
+                </div>
+                <div class="network-visualization" id="networkVisualization">
+                    <!-- Network visualization will be rendered here -->
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-body">
+                <h5 class="card-title">Marginal Probabilities</h5>
+                <div id="marginalsContainer">
+                    {% for node_name, node in nodes.items %}
+                    <div class="node-card">
+                        <h6>{{ node.label }} ({{ node_name }})</h6>
+                        <div class="marginals-content" id="marginals-{{ node_name }}">
+                            <!-- Marginals will be populated here -->
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-primary" id="calculateMarginals">Calculate Marginals</button>
+                    <button class="btn btn-secondary" id="plotMarginals">Plot Marginals</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Set Findings</h5>
+                {% for node_name, node in nodes.items %}
+                <div class="mb-3">
+                    <label class="form-label">{{ node.label }}</label>
+                    <select class="form-select finding-select" data-node="{{ node_name }}">
+                        <option value="">No finding</option>
+                        {% for value in node.values %}
+                        <option value="{{ value }}">{{ value }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endfor %}
+                <button class="btn btn-outline-secondary" id="clearFindings">Clear All Findings</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Plot Modal -->
+<div class="modal fade" id="plotModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Marginal Probabilities Plot</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <img id="plotImage" class="plot-image" src="" alt="Marginal probabilities plot">
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+const networkData = JSON.parse('{{ nodes|escapejs|safe }}');
+let currentFindings = new Map();
+
+function visualizeNetwork() {
+    const width = document.getElementById('networkVisualization').offsetWidth;
+    const height = 400;
+    
+    // Clear previous visualization
+    d3.select('#networkVisualization').select('svg').remove();
+    
+    const svg = d3.select('#networkVisualization')
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height);
+    
+    const nodeData = Object.entries(networkData).map(([name, node]) => ({
+        id: name,
+        label: node.label,
+        x: Math.random() * width,
+        y: Math.random() * height,
+        hasFinding: currentFindings.has(name)
+    }));
+    
+    const links = [];
+    Object.entries(networkData).forEach(([name, node]) => {
+        if (node.parents) {
+            node.parents.forEach(parent => {
+                links.push({
+                    source: parent,
+                    target: name
+                });
+            });
+        }
+    });
+    
+    const simulation = d3.forceSimulation(nodeData)
+        .force('link', d3.forceLink(links).id(d => d.id))
+        .force('charge', d3.forceManyBody().strength(-100))
+        .force('center', d3.forceCenter(width / 2, height / 2));
+    
+    const link = svg.append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('stroke', '#999')
+        .attr('stroke-opacity', 0.6);
+    
+    const node = svg.append('g')
+        .selectAll('g')
+        .data(nodeData)
+        .join('g')
+        .attr('class', d => `node${d.hasFinding ? ' with-finding' : ''}`)
+        .call(d3.drag()
+            .on('start', dragstarted)
+            .on('drag', dragged)
+            .on('end', dragended));
+    
+    node.append('circle')
+        .attr('r', 20);
+    
+    node.append('text')
+        .text(d => d.label)
+        .attr('text-anchor', 'middle')
+        .attr('dy', '0.35em');
+    
+    simulation.on('tick', () => {
+        link
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+        
+        node
+            .attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+    
+    function dragstarted(event) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        event.subject.fx = event.subject.x;
+        event.subject.fy = event.subject.y;
+    }
+    
+    function dragged(event) {
+        event.subject.fx = event.x;
+        event.subject.fy = event.y;
+    }
+    
+    function dragended(event) {
+        if (!event.active) simulation.alphaTarget(0);
+        event.subject.fx = null;
+        event.subject.fy = null;
+    }
+}
+
+async function calculateMarginals() {
+    try {
+        const findings = Object.fromEntries(currentFindings);
+        const response = await fetch("{% url 'bayesnet_app:calculate_marginals' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({
+                network_id: '{{ network.id }}',
+                findings: findings
+            })
+        });
+        
+        const data = await response.json();
+        updateMarginalDisplay(data.marginals);
+    } catch (error) {
+        console.error('Error calculating marginals:', error);
+        alert('Error calculating marginals. Please try again.');
+    }
+}
+
+function updateMarginalDisplay(marginals) {
+    Object.entries(marginals).forEach(([nodeName, marginal]) => {
+        const container = document.getElementById(`marginals-${nodeName}`);
+        container.innerHTML = '';
+        
+        marginal.forEach(row => {
+            const value = Object.keys(row)[0];
+            const prob = row[value];
+            const width = prob * 100;
+            
+            const html = `
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between">
+                        <span>${value}</span>
+                        <span>${(prob * 100).toFixed(2)}%</span>
+                    </div>
+                    <div class="probability-bar" style="width: ${width}%"></div>
+                </div>
+            `;
+            container.innerHTML += html;
+        });
+    });
+}
+
+// Handle findings
+document.querySelectorAll('.finding-select').forEach(select => {
+    select.addEventListener('change', function() {
+        const nodeName = this.dataset.node;
+        const value = this.value;
+        
+        if (value) {
+            currentFindings.set(nodeName, value);
+        } else {
+            currentFindings.delete(nodeName);
+        }
+        
+        if (document.getElementById('showFindings').checked) {
+            visualizeNetwork();
+        }
+        
+        calculateMarginals();
+    });
+});
+
+// Handle show/hide findings in visualization
+document.getElementById('showFindings').addEventListener('change', function() {
+    visualizeNetwork();
+});
+
+// Handle clear findings
+document.getElementById('clearFindings').addEventListener('click', function() {
+    currentFindings.clear();
+    document.querySelectorAll('.finding-select').forEach(select => {
+        select.value = '';
+    });
+    visualizeNetwork();
+    calculateMarginals();
+});
+
+// Initialize visualization
+visualizeNetwork();
+calculateMarginals();
+
+// Plot marginals
+document.getElementById('plotMarginals').addEventListener('click', async function() {
+    try {
+        const findings = Object.fromEntries(currentFindings);
+        const response = await fetch("{% url 'bayesnet_app:plot_marginals' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({
+                network_id: '{{ network.id }}',
+                findings: findings
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            document.getElementById('plotImage').src = data.plot_url;
+            new bootstrap.Modal(document.getElementById('plotModal')).show();
+        }
+    } catch (error) {
+        console.error('Error plotting marginals:', error);
+        alert('Error plotting marginals. Please try again.');
+    }
+});
+</script>
+{% endblock %} 

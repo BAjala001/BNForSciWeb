@@ -1,0 +1,43 @@
+{% extends 'bayesnet_app/base.html' %}
+
+{% block content %}
+<div class="jumbotron text-center">
+    <h1 class="display-4">Welcome to BNForSci</h1>
+    <p class="lead">A powerful Bayesian Network software for scientific applications</p>
+    <hr class="my-4">
+    <p>Create, analyze, and visualize Bayesian Networks with our intuitive interface.</p>
+    {% if user.is_authenticated %}
+        <a class="btn btn-primary btn-lg" href="{% url 'bayesnet_app:create_network' %}" role="button">Launch</a>
+    {% else %}
+        <a class="btn btn-primary btn-lg" href="{% url 'bayesnet_app:login' %}" role="button">Login</a>
+        <a class="btn btn-secondary btn-lg" href="{% url 'bayesnet_app:register' %}" role="button">Register</a>
+    {% endif %}
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fas fa-network-wired"></i> Network Creation</h5>
+                <p class="card-text">Build Bayesian Networks with an intuitive graphical interface.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fas fa-calculator"></i> Probability Analysis</h5>
+                <p class="card-text">Calculate marginal probabilities and analyze network dependencies.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fas fa-chart-bar"></i> Visualization</h5>
+                <p class="card-text">Visualize network structures and probability distributions.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

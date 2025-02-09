@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from Node import Node
 import matplotlib
-matplotlib.use('TkAgg')  # Set the backend to TkAgg before importing pyplot
+matplotlib.use('Agg')  # Use Agg backend instead of TkAgg
 import matplotlib.pyplot as plt
 import networkx as nx
 import itertools
@@ -448,7 +448,7 @@ class BayesNet:
         # Make sure we have marginals computed
         # (the user may not have called these specifically)
         self.CreateMarginals()  # Initialize placeholders
-        self.CalcMarginals()  # Fill in unconditional marginals
+        self.CalcMarginals()
 
         # If we want to include findings, calculate them too
         if with_findings:
@@ -484,31 +484,37 @@ class BayesNet:
         for node_name, node in self.nodes.items():
             print(f"Node {node_name}: finding = {node.finding}")
 
-        fig, ax = plt.subplots(figsize=(8, 8))
+        fig, ax = plt.subplots(figsize=(10, 8))
+        fig.patch.set_facecolor('white')
+        ax.set_facecolor('white')
 
         # We need to draw arrows first (from parents to children)
         for parent_name, parent_node in self.nodes.items():
             for child_name in parent_node.children:
                 child_node = self.nodes[child_name]
-
-                # Arrow endpoints
-                xArrowBegin = parent_node.xPos
-                yArrowBegin = parent_node.yPos + parent_node.height / 2
-                xArrowEnd = child_node.xPos
-                yArrowEnd = child_node.yPos - child_node.height / 2
-
-                dx = 0.95 * (xArrowEnd - xArrowBegin)
-                dy = 0.95 * (yArrowEnd - yArrowBegin)
-
-                arrow = patches.FancyArrow(
-                    xArrowBegin,
-                    yArrowBegin,
-                    dx,
-                    dy,
-                    width=0.01,
-                    head_width=0.05,
-                    head_length=0.07,
-                    color="grey",
+                
+                # Calculate edge points
+                dx = child_node.xPos - parent_node.xPos
+                dy = child_node.yPos - parent_node.yPos
+                angle = np.arctan2(dy, dx)
+                
+                # Calculate start point (on parent ellipse edge)
+                start_x = parent_node.xPos + (parent_node.width/2) * np.cos(angle)
+                start_y = parent_node.yPos + (parent_node.height/2) * np.sin(angle)
+                
+                # Calculate end point (on child ellipse edge)
+                end_x = child_node.xPos - (child_node.width/2) * np.cos(angle)
+                end_y = child_node.yPos - (child_node.height/2) * np.sin(angle)
+                
+                # Draw arrow
+                arrow = patches.FancyArrowPatch(
+                    (start_x, start_y),
+                    (end_x, end_y),
+                    connectionstyle="arc3,rad=0",  # Straight lines
+                    arrowstyle="-|>",
+                    mutation_scale=15,
+                    color='gray',
+                    zorder=1
                 )
                 ax.add_patch(arrow)
 
@@ -525,6 +531,7 @@ class BayesNet:
                 linewidth = node.linewidth
                 edgecolor = node.edgecolor
 
+            # Create ellipse with node's visual properties
             ellipse = patches.Ellipse(
                 (x, y),
                 node.width,
@@ -532,6 +539,8 @@ class BayesNet:
                 edgecolor=edgecolor,
                 facecolor=node.facecolor,
                 linewidth=linewidth,
+                alpha=0.7,
+                zorder=2
             )
             ax.add_patch(ellipse)
 
@@ -545,10 +554,10 @@ class BayesNet:
                 ha=node.ha,
                 va="top",
                 font=node.font,
+                zorder=3
             )
 
             # Fetch the node's marginal from marginals_to_use
-            # (which is a dictionary keyed by node_name, each entry is a DataFrame)
             marginal_df = marginals_to_use[node_name]
             # Ensure 'Prob' is float
             marginal_df["Prob"] = marginal_df["Prob"].astype(float)
@@ -566,11 +575,12 @@ class BayesNet:
                 x,
                 y,
                 marg_text,
-                ha="center",
-                va="center",
+                ha=node.ha,
+                va=node.va,
                 fontsize=node.fontsize,
                 color=node.textcolor,
                 font=node.font,
+                zorder=3
             )
 
             # If there's a finding, indicate with an 'f' in red
@@ -584,23 +594,31 @@ class BayesNet:
                     ha="left",
                     va="top",
                     fontweight="bold",
+                    zorder=4
                 )
 
         # Set plot bounds
-        nLayers = self.CalcNumberOfLayers()
-        nMaxNodesInLayer = self.CalcMaxNumberOfNodesInLayers()
-        ax.set_xlim(0, nMaxNodesInLayer + 1)
-        ax.set_ylim(nLayers + 1, 0)
-        ax.axis("on")
+        all_x = [node.xPos for node in self.nodes.values()]
+        all_y = [node.yPos for node in self.nodes.values()]
+        margin = 0.5
+        
+        if all_x and all_y:  # Check if lists are not empty
+            plt.xlim(min(all_x) - margin, max(all_x) + margin)
+            plt.ylim(max(all_y) + margin, min(all_y) - margin)  # Invert Y-axis
+        
+        # Show axis with grid
+        ax.grid(True, linestyle='--', alpha=0.3)
+        ax.set_xlabel('X Position')
+        ax.set_ylabel('Y Position')
+        plt.axis('on')  # Show the axis
 
         # Adjust the title
         if with_findings:
-            plt.title(f"Marginal Probabilities {title_suffix}\n{findings_text}")
+            plt.title(f"Marginal Probabilities {title_suffix}\n{findings_text}", pad=20, fontsize=12, fontweight='bold')
         else:
-            plt.title(f"Marginal Probabilities {title_suffix}")
+            plt.title(f"Marginal Probabilities {title_suffix}", pad=20, fontsize=12, fontweight='bold')
 
         plt.tight_layout()
-        # Remove plt.show() to make it thread-safe
         return fig
 
     def SetFinding(self, node_name, value):

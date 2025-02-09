@@ -729,17 +729,34 @@ document.getElementById('plotMarginals').addEventListener('click', function() {
         return response.json();
     })
     .then(data => {
-        if (!data.plot) {
-            throw new Error('No plot data received from server');
+        if (data.success && data.plot) {
+            // Update node positions from the plot
+            if (data.node_positions) {
+                data.node_positions.forEach(pos => {
+                    const node = nodes.find(n => n.name === pos.name);
+                    if (node) {
+                        node.xPos = pos.xPos;
+                        node.yPos = pos.yPos;
+                        console.log(`Updated position for ${node.name}: x=${pos.xPos}, y=${pos.yPos}`);
+                    }
+                });
+            }
+            
+            // Show the plot in a modal
+            const plotModal = new bootstrap.Modal(document.getElementById('plotMarginalsModal'));
+            document.getElementById('plotMarginalsDisplay').innerHTML = `
+                <img src="data:image/png;base64,${data.plot}" 
+                     alt="Marginal Probabilities" 
+                     style="max-width: 100%; height: auto;">
+            `;
+            plotModal.show();
+        } else {
+            throw new Error(data.error || 'Failed to plot marginals');
         }
-        
-        const plotDisplay = document.getElementById('plotMarginalsDisplay');
-        plotDisplay.innerHTML = `<img src="data:image/png;base64,${data.plot}" alt="Marginals Plot" style="max-width: 100%; height: auto;">`;
-        new bootstrap.Modal(document.getElementById('plotMarginalsModal')).show();
     })
     .catch(error => {
-        console.error('Error plotting marginals:', error);
-        alert('Error plotting marginals: ' + error.message);
+        console.error('Error:', error);
+        alert(error.message);
     });
 });
 
@@ -890,26 +907,18 @@ document.getElementById('saveNodeEdits').addEventListener('click', function() {
         return;
     }
     
-    // Check if new name conflicts with existing nodes (except self)
-    if (newName !== originalName && nodes.some(n => n.name === newName)) {
-        alert('A node with this name already exists');
-        return;
-    }
-    
-    // Check if this node is a parent of other nodes
-    if (originalName !== newName) {
-        const dependentNodes = nodes.filter(n => n.parents.includes(originalName));
-        if (dependentNodes.length > 0) {
-            // Update parent references in dependent nodes
-            dependentNodes.forEach(node => {
-                node.parents = node.parents.map(p => p === originalName ? newName : p);
-            });
-        }
-    }
-    
-    // Update node
+    // Find the node index
     const nodeIndex = nodes.findIndex(n => n.name === originalName);
+    if (nodeIndex === -1) return;
+    
+    // Store the existing CPT values before updating the node
+    const nodeDiv = document.querySelector(`.node-item[data-node-name="${originalName}"]`);
+    const existingCptInputs = nodeDiv.querySelectorAll('.cpt-input');
+    const existingCptValues = Array.from(existingCptInputs).map(input => parseFloat(input.value) || 0);
+    
+    // Update node properties
     nodes[nodeIndex] = {
+        ...nodes[nodeIndex],
         name: newName,
         label: newLabel,
         values: newValues,
@@ -922,14 +931,13 @@ document.getElementById('saveNodeEdits').addEventListener('click', function() {
         facecolor: facecolor,
         linewidth: linewidth,
         fontsize: fontsize,
-        textcolor: textcolor,
-        ha: 'center',
-        va: 'center'
+        textcolor: textcolor
     };
     
-    // Update display
-    const nodeDiv = document.querySelector(`.node-item[data-node-name="${originalName}"]`);
+    // Update node div data attribute
     nodeDiv.dataset.nodeName = newName;
+    
+    // Update node display
     nodeDiv.innerHTML = `
         <div class="d-flex justify-content-between align-items-start mb-2">
             <h6>${newLabel} (${newName})</h6>
@@ -942,6 +950,14 @@ document.getElementById('saveNodeEdits').addEventListener('click', function() {
         <p>Parents: ${newParents.length > 0 ? newParents.join(', ') : 'None'}</p>
         ${createCPTTable(nodes[nodeIndex])}
     `;
+    
+    // Restore CPT values if the structure hasn't changed
+    const newCptInputs = nodeDiv.querySelectorAll('.cpt-input');
+    if (newCptInputs.length === existingCptValues.length) {
+        newCptInputs.forEach((input, index) => {
+            input.value = existingCptValues[index];
+        });
+    }
     
     // Update parent options for all nodes
     updateParentOptions();

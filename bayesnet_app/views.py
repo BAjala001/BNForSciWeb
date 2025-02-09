@@ -237,6 +237,29 @@ def calculate_marginals(request):
                             cpt = create_cpt_dataframe(node, cpt_values, network)
                             network.SetCpt(node_name, cpt)
                 
+                # Check if all CPTs sum to exactly 1
+                problematic_nodes = []
+                for node_name, node in network.nodes.items():
+                    cpt = node.cpt
+                    if node.parents:
+                        # For nodes with parents, group by parent values
+                        parent_columns = node.parents
+                        grouped = cpt.groupby(parent_columns)['Prob'].sum()
+                        # Check if any group's sum is not exactly 1
+                        for parent_values, prob_sum in grouped.items():
+                            if prob_sum != 1.0:
+                                problematic_nodes.append(f"{node.label} ({node_name}) for parent values {parent_values}")
+                    else:
+                        # For root nodes, simply sum all probabilities
+                        prob_sum = cpt['Prob'].sum()
+                        if prob_sum != 1.0:
+                            problematic_nodes.append(f"{node.label} ({node_name})")
+                
+                if problematic_nodes:
+                    error_msg = "CPT probabilities must sum to exactly 1.0 for the following nodes:\n"
+                    error_msg += "\n".join(problematic_nodes)
+                    return JsonResponse({'error': error_msg}, status=400)
+                
                 # Calculate joint distribution first
                 print("Calculating joint distribution...")
                 network.CalcJointDist()
@@ -325,10 +348,15 @@ def plot_marginals(request):
                 print("Error: Missing nodes in network data")
                 return JsonResponse({'error': 'No nodes found in network data'}, status=400)
             
-            # Create a new BayesNet instance with a default label
-            network = BayesNet(label="user_network")
-            
             try:
+                import matplotlib
+                matplotlib.use('Agg')  # Ensure we're using Agg backend
+                import matplotlib.pyplot as plt
+                plt.ioff()  # Turn off interactive mode
+                
+                # Create a new BayesNet instance with a default label
+                network = BayesNet(label="user_network")
+                
                 # First pass: Add all nodes to the network
                 for node_data in network_data['nodes']:
                     # Create a Node object with proper string values and visual properties
@@ -366,6 +394,29 @@ def plot_marginals(request):
                             cpt = create_cpt_dataframe(node, cpt_values, network)
                             network.SetCpt(node_name, cpt)
                             print(f"Set CPT for node: {node.name}")  # Debug log
+
+                # Check if all CPTs sum to exactly 1
+                problematic_nodes = []
+                for node_name, node in network.nodes.items():
+                    cpt = node.cpt
+                    if node.parents:
+                        # For nodes with parents, group by parent values
+                        parent_columns = node.parents
+                        grouped = cpt.groupby(parent_columns)['Prob'].sum()
+                        # Check if any group's sum is not exactly 1
+                        for parent_values, prob_sum in grouped.items():
+                            if prob_sum != 1.0:
+                                problematic_nodes.append(f"{node.label} ({node_name}) for parent values {parent_values}")
+                    else:
+                        # For root nodes, simply sum all probabilities
+                        prob_sum = cpt['Prob'].sum()
+                        if prob_sum != 1.0:
+                            problematic_nodes.append(f"{node.label} ({node_name})")
+                
+                if problematic_nodes:
+                    error_msg = "CPT probabilities must sum to exactly 1.0 for the following nodes:\n"
+                    error_msg += "\n".join(problematic_nodes)
+                    return JsonResponse({'error': error_msg}, status=400)
                 
                 # Calculate joint distribution first
                 print("Calculating joint distribution...")
@@ -404,8 +455,27 @@ def plot_marginals(request):
                 # Encode the image in base64
                 graphic = base64.b64encode(image_png).decode('utf-8')
                 
-                return JsonResponse({'plot': graphic})
+                # Collect node positions
+                node_positions = [
+                    {
+                        'name': node_name,
+                        'xPos': float(node.xPos),
+                        'yPos': float(node.yPos)
+                    }
+                    for node_name, node in network.nodes.items()
+                ]
                 
+                return JsonResponse({
+                    'success': True,
+                    'plot': graphic,
+                    'node_positions': node_positions
+                })
+                
+            except ImportError as e:
+                print(f"Error importing matplotlib: {str(e)}")
+                return JsonResponse({
+                    'error': 'Unable to generate plot due to missing dependencies. Please contact support.'
+                }, status=500)
             except Exception as e:
                 print(f"Error in network operations: {str(e)}")
                 return JsonResponse({'error': str(e)}, status=400)
@@ -472,152 +542,173 @@ def plot_network(request):
                     'error': 'No nodes provided'
                 }, status=400)
 
-            # Create a new BayesNet instance
-            bn = BayesNet(label="Network")
+            try:
+                import matplotlib
+                matplotlib.use('Agg')  # Ensure we're using Agg backend
+                import matplotlib.pyplot as plt
+                plt.ioff()  # Turn off interactive mode
 
-            # First pass: Add all nodes to the network
-            for node_data in nodes_data:
-                node = Node(
-                    name=str(node_data['name']),
-                    label=str(node_data['label']),
-                    values=[str(v) for v in node_data['values']],
-                    parents=[str(p) for p in node_data['parents']]
-                )
-                bn.AddNode(node)
+                # Create a new BayesNet instance
+                bn = BayesNet(label="Network")
 
-            # Second pass: Set CPTs
-            for node_data in nodes_data:
-                if 'cpt' in node_data and node_data['cpt']:
-                    node = bn.nodes[node_data['name']]
-                    cpt = create_cpt_dataframe(node, node_data['cpt'], bn)
-                    bn.SetCpt(node.name, cpt)
-
-            # Clear any existing plots
-            plt.close('all')
-            plt.clf()
-
-            # Create new figure with white background
-            fig = plt.figure(figsize=(10, 8))
-            fig.patch.set_facecolor('white')
-            ax = fig.add_subplot(111)
-            ax.set_facecolor('white')
-
-            # Calculate node positions
-            bn.CalcYPos()
-            bn.CalcXPos()
-
-            # Get node positions
-            all_x = [node.xPos for node in bn.nodes.values()]
-            all_y = [node.yPos for node in bn.nodes.values()]
-
-            if not all_x or not all_y:
-                raise ValueError("Node positions not calculated correctly")
-
-            # Calculate plot bounds
-            x_min, x_max = min(all_x), max(all_x)
-            y_min, y_max = min(all_y), max(all_y)
-            margin = 0.5
-
-            # Draw arrows first
-            for node_name, node in bn.nodes.items():
-                for parent_name in node.parents:
-                    parent = bn.nodes[parent_name]
-                    
-                    # Calculate edge points
-                    dx = node.xPos - parent.xPos
-                    dy = node.yPos - parent.yPos
-                    angle = np.arctan2(dy, dx)
-                    
-                    # Calculate start point (on parent ellipse edge)
-                    start_x = parent.xPos + (0.4) * np.cos(angle)  # 0.4 is half the width of ellipse
-                    start_y = parent.yPos + (0.2) * np.sin(angle)  # 0.2 is half the height of ellipse
-                    
-                    # Calculate end point (on child ellipse edge)
-                    end_x = node.xPos - (0.4) * np.cos(angle)
-                    end_y = node.yPos - (0.2) * np.sin(angle)
-                    
-                    # Draw straight arrow
-                    arrow = plt.matplotlib.patches.FancyArrowPatch(
-                        (start_x, start_y),
-                        (end_x, end_y),
-                        arrowstyle='-|>',
-                        connectionstyle='arc3,rad=0',  # rad=0 makes it straight
-                        mutation_scale=15,
-                        linewidth=1.5,
-                        color='gray',
-                        zorder=1
+                # First pass: Add all nodes to the network
+                for node_data in nodes_data:
+                    node = Node(
+                        name=str(node_data['name']),
+                        label=str(node_data['label']),
+                        values=[str(v) for v in node_data['values']],
+                        parents=[str(p) for p in node_data['parents']]
                     )
-                    ax.add_patch(arrow)
+                    bn.AddNode(node)
 
-            # Draw nodes
-            for node_name, node in bn.nodes.items():
-                # Draw node ellipse
-                ellipse = plt.matplotlib.patches.Ellipse(
-                    (node.xPos, node.yPos),
-                    0.8,  # width
-                    0.4,  # height
-                    facecolor='lightblue',
-                    edgecolor='blue',
-                    linewidth=2,
-                    alpha=0.7,
-                    zorder=2
-                )
-                ax.add_patch(ellipse)
+                # Second pass: Set CPTs
+                for node_data in nodes_data:
+                    if 'cpt' in node_data and node_data['cpt']:
+                        node = bn.nodes[node_data['name']]
+                        cpt = create_cpt_dataframe(node, node_data['cpt'], bn)
+                        bn.SetCpt(node.name, cpt)
 
-                # Add node label
-                ax.text(
-                    node.xPos,
-                    node.yPos,
-                    f"{node.label}\n({node.name})",
-                    ha='center',
-                    va='center',
-                    fontsize=10,
-                    color='black',
-                    fontweight='bold',
-                    zorder=3
-                )
+                # Clear any existing plots
+                plt.close('all')
+                plt.clf()
 
-            # Set plot bounds
-            plt.xlim(x_min - margin, x_max + margin)
-            plt.ylim(y_max + margin, y_min - margin)  # Invert Y-axis by swapping the order
-            
-            # Show axis with grid
-            ax.grid(True, linestyle='--', alpha=0.3)
-            ax.set_xlabel('X Position')
-            ax.set_ylabel('Y Position')
-            plt.axis('on')  # Show the axis
+                # Create new figure with white background
+                fig = plt.figure(figsize=(10, 8))
+                fig.patch.set_facecolor('white')
+                ax = fig.add_subplot(111)
+                ax.set_facecolor('white')
 
-            # Add title
-            plt.title("Network Structure", pad=20, fontsize=12, fontweight='bold')
+                # Calculate node positions
+                bn.CalcYPos()
+                bn.CalcXPos()
 
-            # Save plot to bytes buffer
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png', bbox_inches='tight', dpi=100,
-                       facecolor='white', edgecolor='none', pad_inches=0.1,
-                       transparent=False)
-            plt.close(fig)
-            plt.close('all')
+                # Get node positions
+                all_x = [node.xPos for node in bn.nodes.values()]
+                all_y = [node.yPos for node in bn.nodes.values()]
 
-            # Encode plot data
-            buf.seek(0)
-            plot_data = base64.b64encode(buf.getvalue()).decode('utf-8')
-            buf.close()
+                if not all_x or not all_y:
+                    raise ValueError("Node positions not calculated correctly")
 
-            # Collect node positions
-            node_positions = [
-                {
-                    'name': node_name,
-                    'xPos': float(node.xPos),
-                    'yPos': float(node.yPos)
-                }
-                for node_name, node in bn.nodes.items()
-            ]
+                # Calculate plot bounds
+                x_min, x_max = min(all_x), max(all_x)
+                y_min, y_max = min(all_y), max(all_y)
+                margin = 0.5
 
-            return JsonResponse({
-                'success': True,
-                'plot': plot_data,
-                'node_positions': node_positions
-            })
+                # Draw arrows first
+                for node_name, node in bn.nodes.items():
+                    for parent_name in node.parents:
+                        parent = bn.nodes[parent_name]
+                        
+                        # Calculate edge points
+                        dx = node.xPos - parent.xPos
+                        dy = node.yPos - parent.yPos
+                        angle = np.arctan2(dy, dx)
+                        
+                        # Calculate start point (on parent ellipse edge)
+                        start_x = parent.xPos + (0.4) * np.cos(angle)  # 0.4 is half the width of ellipse
+                        start_y = parent.yPos + (0.2) * np.sin(angle)  # 0.2 is half the height of ellipse
+                        
+                        # Calculate end point (on child ellipse edge)
+                        end_x = node.xPos - (0.4) * np.cos(angle)
+                        end_y = node.yPos - (0.2) * np.sin(angle)
+                        
+                        # Draw straight arrow
+                        arrow = plt.matplotlib.patches.FancyArrowPatch(
+                            (start_x, start_y),
+                            (end_x, end_y),
+                            arrowstyle='-|>',
+                            connectionstyle='arc3,rad=0',  # rad=0 makes it straight
+                            mutation_scale=15,
+                            linewidth=1.5,
+                            color='gray',
+                            zorder=1
+                        )
+                        ax.add_patch(arrow)
+
+                # Draw nodes
+                for node_name, node in bn.nodes.items():
+                    # Draw node ellipse
+                    ellipse = plt.matplotlib.patches.Ellipse(
+                        (node.xPos, node.yPos),
+                        0.8,  # width
+                        0.4,  # height
+                        facecolor='lightblue',
+                        edgecolor='blue',
+                        linewidth=2,
+                        alpha=0.7,
+                        zorder=2
+                    )
+                    ax.add_patch(ellipse)
+
+                    # Add node label
+                    ax.text(
+                        node.xPos,
+                        node.yPos,
+                        f"{node.label}\n({node.name})",
+                        ha='center',
+                        va='center',
+                        fontsize=10,
+                        color='black',
+                        fontweight='bold',
+                        zorder=3
+                    )
+
+                # Set plot bounds
+                plt.xlim(x_min - margin, x_max + margin)
+                plt.ylim(y_max + margin, y_min - margin)  # Invert Y-axis by swapping the order
+                
+                # Show axis with grid
+                ax.grid(True, linestyle='--', alpha=0.3)
+                ax.set_xlabel('X Position')
+                ax.set_ylabel('Y Position')
+                plt.axis('on')  # Show the axis
+
+                # Add title
+                plt.title("Network Structure", pad=20, fontsize=12, fontweight='bold')
+
+                # Save plot to bytes buffer
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png', bbox_inches='tight', dpi=100,
+                           facecolor='white', edgecolor='none', pad_inches=0.1,
+                           transparent=False)
+                plt.close(fig)
+                plt.close('all')
+
+                # Encode plot data
+                buf.seek(0)
+                plot_data = base64.b64encode(buf.getvalue()).decode('utf-8')
+                buf.close()
+
+                # Collect node positions
+                node_positions = [
+                    {
+                        'name': node_name,
+                        'xPos': float(node.xPos),
+                        'yPos': float(node.yPos)
+                    }
+                    for node_name, node in bn.nodes.items()
+                ]
+
+                return JsonResponse({
+                    'success': True,
+                    'plot': plot_data,
+                    'node_positions': node_positions
+                })
+
+            except ImportError as e:
+                print(f"Error importing matplotlib: {str(e)}")
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Unable to generate plot due to missing dependencies. Please contact support.'
+                }, status=500)
+            except Exception as e:
+                print(f"Error in network operations: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return JsonResponse({
+                    'success': False,
+                    'error': str(e)
+                }, status=400)
 
         except Exception as e:
             print(f"Error in plot_network: {str(e)}")

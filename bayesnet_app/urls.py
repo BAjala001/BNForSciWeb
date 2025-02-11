@@ -15,4 +15,5 @@ urlpatterns = [
     path('api/plot-marginals/', views.plot_marginals, name='plot_marginals'),
     path('api/save-network/', views.save_network, name='save_network'),
     path('plot_network/', views.plot_network, name='plot_network'),
+    path('api/save-network-db/', views.save_network_db, name='save_network_db'),
 ] 

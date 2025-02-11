@@ -360,6 +360,7 @@
 <script>
 let nodes = [];
 let findings = new Map();
+let currentNetworkName = ''; // Track current network name
 
 function createCPTTable(node) {
     if (node.parents.length === 0) {
@@ -602,27 +603,12 @@ document.getElementById('saveNetworkBtn').addEventListener('click', function() {
         return;
     }
     
-    // Collect CPT values and findings
-    const network = {
-        nodes: nodes.map(node => {
-            const nodeDiv = document.querySelector(`.node-item[data-node-name="${node.name}"]`);
-            const cptInputs = nodeDiv.querySelectorAll('.cpt-input');
-            const cptValues = Array.from(cptInputs).map(input => {
-                const value = parseFloat(input.value);
-                return isNaN(value) ? 0 : value;
-            });
-            
-            return {
-                ...node,
-                cpt: cptValues
-            };
-        }),
-        findings: Object.fromEntries(findings)
-    };
+    // If we have a current network name, pre-fill it
+    if (currentNetworkName) {
+        document.getElementById('networkName').value = currentNetworkName;
+    }
     
-    // Save to local storage
-    localStorage.setItem('bayesianNetwork', JSON.stringify(network));
-    alert('Network saved successfully!');
+    saveNetworkModal.show();
 });
 
 // Calculate marginals
@@ -1090,17 +1076,19 @@ function getCookie(name) {
 
 const saveNetworkModal = new bootstrap.Modal(document.getElementById('saveNetworkModal'));
 
-// Save Network button handler
-document.getElementById('saveNetworkBtn').addEventListener('click', function() {
-    saveNetworkModal.show();
-});
-
 // Confirm Save Network handler
-document.getElementById('confirmSaveNetwork').addEventListener('click', function() {
+document.getElementById('confirmSaveNetwork').addEventListener('click', async function() {
     const networkName = document.getElementById('networkName').value.trim();
     if (!networkName) {
         alert('Please enter a network name');
         return;
+    }
+
+    // If we're updating an existing network with a different name, confirm with user
+    if (currentNetworkName && currentNetworkName !== networkName) {
+        if (!confirm('You are saving this network with a different name. The existing network will not be updated. Do you want to continue?')) {
+            return;
+        }
     }
 
     // Collect network data
@@ -1121,18 +1109,62 @@ document.getElementById('confirmSaveNetwork').addEventListener('click', function
         })
     };
 
-    // Create and download file
-    const blob = new Blob([JSON.stringify(networkData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${networkName}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try {
+        // First save to server database
+        const serverResponse = await fetch("{% url 'bayesnet_app:save_network_db' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify(networkData)
+        });
+        
+        const serverData = await serverResponse.json();
+        if (!serverData.success) {
+            throw new Error(serverData.error || 'Failed to save network to server');
+        }
 
-    saveNetworkModal.hide();
+        // Then save to local file system
+        try {
+            // Create file content
+            const fileContent = JSON.stringify(networkData, null, 2);
+            const blob = new Blob([fileContent], { type: 'application/json' });
+
+            // Show the file save dialog
+            const handle = await window.showSaveFilePicker({
+                suggestedName: `${networkName}.json`,
+                types: [{
+                    description: 'JSON Files',
+                    accept: {
+                        'application/json': ['.json']
+                    }
+                }]
+            });
+
+            // Write the file
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+
+            // Update current network name
+            currentNetworkName = networkName;
+            saveNetworkModal.hide();
+            
+            alert(`Network saved successfully!\nLocation: ${handle.name}`);
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                // User cancelled the save dialog
+                alert('Network saved to server but file save was cancelled.');
+            } else {
+                console.error('Error saving file:', err);
+                alert('Network saved to server but there was an error saving the file locally: ' + err.message);
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error saving network: ' + error.message);
+    }
 });
 
 // Load Network button handler
@@ -1153,6 +1185,9 @@ document.getElementById('networkFileInput').addEventListener('change', function(
             // Clear existing nodes
             nodes = [];
             document.getElementById('networkNodes').innerHTML = '';
+            
+            // Update current network name
+            currentNetworkName = networkData.name || file.name.replace('.json', '');
             
             // Load nodes
             networkData.nodes.forEach(node => {

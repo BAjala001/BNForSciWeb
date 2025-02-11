@@ -723,3 +723,56 @@ def plot_network(request):
         'success': False,
         'error': 'Invalid request method'
     }, status=400)
+
+@csrf_exempt
+def save_network_db(request):
+    """API endpoint for saving a network to the database"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            network_name = data.get('name')
+            
+            if not network_name:
+                return JsonResponse({'success': False, 'error': 'Network name is required'})
+            
+            # Create BayesNet instance
+            network = BayesNet(label=network_name)
+            
+            # First pass: Add nodes
+            for node_data in data['nodes']:
+                node = Node(
+                    name=node_data['name'],
+                    label=node_data['label'],
+                    values=node_data['values'],
+                    parents=node_data['parents']
+                )
+                network.AddNode(node)
+            
+            # Second pass: Set CPTs
+            for node_data in data['nodes']:
+                node_name = node_data['name']
+                node = network.nodes[node_name]
+                
+                # Set CPT if provided
+                if 'cpt' in node_data:
+                    cpt_values = node_data['cpt']
+                    if isinstance(cpt_values, list):
+                        cpt = create_cpt_dataframe(node, cpt_values, network)
+                        network.SetCpt(node.name, cpt)
+            
+            # Try to find existing network with same name
+            try:
+                network_model = BayesNetModel.objects.get(name=network_name)
+                # Update existing network
+                network_model.save_network(network)
+                return JsonResponse({'success': True, 'message': 'Network updated successfully'})
+            except BayesNetModel.DoesNotExist:
+                # Create new network
+                network_model = BayesNetModel(name=network_name)
+                network_model.save_network(network)
+                return JsonResponse({'success': True, 'message': 'Network saved successfully'})
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return JsonResponse({'error': 'Invalid request'}, status=400)

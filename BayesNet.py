@@ -436,81 +436,46 @@ class BayesNet:
         """
         print(f"PlotMarginals called with with_findings={with_findings}")
 
-        # Ensure children & positions are computed
-        self.CalcChildren()
-        self.CalcYPos()
-        self.CalcXPos()
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=(12, 8))
 
-        # If jointDist is empty, compute it
-        if self.jointDist.empty:
-            self.CalcJointDist()
-
-        # Make sure we have marginals computed
-        # (the user may not have called these specifically)
-        self.CreateMarginals()  # Initialize placeholders
-        self.CalcMarginals()
-
-        # If we want to include findings, calculate them too
+        # Determine which marginals to use
         if with_findings:
-            print("Calculating marginals with findings")
-            self.CalcMargGivenFindings()
             marginals_to_use = self.margWithFindings
             title_suffix = "with Findings"
-
-            # Now also compute total probability of the findings
-            findings_text = "P("
-            finding_evidence_rows = pd.Series([True] * len(self.jointDist))
-            first_finding = True
-            for node_name, node in self.nodes.items():
-                if node.finding:
-                    # A node's .finding is typically {node_name: some_value}
-                    value = list(node.finding.values())[0]
-                    if not first_finding:
-                        findings_text += ", "
-                    findings_text += f"{node_name}={value}"
-                    first_finding = False
-
-                    # Filter rows in jointDist accordingly
-                    finding_evidence_rows &= self.jointDist[node_name] == value
-
-            total_prob = self.jointDist.loc[finding_evidence_rows, "Pr"].sum()
-            findings_text += f") = {total_prob:.4f}"
+            findings_text = "Findings: " + ", ".join(
+                [f"{node_name}={node.finding[node_name]}"
+                 for node_name, node in self.nodes.items()
+                 if node.finding and len(node.finding) > 0]
+            )
         else:
             marginals_to_use = self.marginals
-            title_suffix = "Original"
+            title_suffix = ""
+            findings_text = ""
 
-        # Print each node and whether it has a finding
-        print("Nodes and their findings:")
+        # Draw arrows between nodes first (in background)
         for node_name, node in self.nodes.items():
-            print(f"Node {node_name}: finding = {node.finding}")
-
-        fig, ax = plt.subplots(figsize=(10, 8))
-        fig.patch.set_facecolor('white')
-        ax.set_facecolor('white')
-
-        # We need to draw arrows first (from parents to children)
-        for parent_name, parent_node in self.nodes.items():
-            for child_name in parent_node.children:
-                child_node = self.nodes[child_name]
+            for parent in node.parents:
+                parent_node = self.nodes[parent]
                 
                 # Calculate edge points
-                dx = child_node.xPos - parent_node.xPos
-                dy = child_node.yPos - parent_node.yPos
+                dx = node.xPos - parent_node.xPos
+                dy = node.yPos - parent_node.yPos
                 angle = np.arctan2(dy, dx)
                 
-                # Calculate start point (on parent ellipse edge)
+                # Calculate start point (on parent ellipse)
                 start_x = parent_node.xPos + (parent_node.width/2) * np.cos(angle)
                 start_y = parent_node.yPos + (parent_node.height/2) * np.sin(angle)
                 
-                # Calculate end point (on child ellipse edge)
-                end_x = child_node.xPos - (child_node.width/2) * np.cos(angle)
-                end_y = child_node.yPos - (child_node.height/2) * np.sin(angle)
+                # Calculate end point (on child ellipse)
+                end_x = node.xPos - (node.width/2) * np.cos(angle)
+                end_y = node.yPos - (node.height/2) * np.sin(angle)
                 
                 # Draw arrow
                 arrow = patches.FancyArrowPatch(
                     (start_x, start_y),
                     (end_x, end_y),
-                    connectionstyle="arc3,rad=0",  # Straight lines
+                    connectionstyle="arc3,rad=0",
                     arrowstyle="-|>",
                     mutation_scale=15,
                     color='gray',
